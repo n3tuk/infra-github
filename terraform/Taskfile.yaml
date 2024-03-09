@@ -1,0 +1,472 @@
+---
+version: 3
+output: prefixed
+interval: 2000ms
+
+vars:
+  ROOT:
+    sh: git rev-parse --show-toplevel
+
+includes:
+  utils:
+    taskfile: '../.taskfiles/utils.yaml'
+    internal: true
+
+tasks:
+  develop:
+    desc: Continiously run the development and integration tasks in the background
+    summary: |-
+      Clean (once) the environment and then continiously run the development and
+      integration tasks in the background, testing and checking any changes made
+      while the code is changed, and keeping the documentation up-to-date.
+    watch: true
+    silent: true
+    deps:
+      - task: utils:pre-checks
+      - task: clean
+    cmds:
+      - task: lint
+      - task: validate
+      - task: security
+      - task: test
+      - task: documentation
+
+  init:
+    desc: Initilise the Terraform configuration
+    summary: |-
+      Initilise the Terraform configuration, and update all Modules and
+      Providers to the latest versions supported.
+    internal: true
+    silent: true
+    sources:
+      # Monitor only the terraform.tf inside this configuration as this is where
+      # the providers are configured, so any re-initialisation will normally
+      # only be needed when this file changes, rather than any .tf file
+      - 'terraform.tf'
+    deps:
+      - task: utils:check:terraform
+    cmds:
+      - cmd: |-
+          terraform init \
+            -no-color \
+            -upgrade -get
+      - cmd: |-
+          terraform providers lock \
+            -no-color \
+            -platform=linux_amd64 \
+            -platform=linux_arm64 \
+            -platform=darwin_amd64 \
+            -platform=darwin_arm64
+    status:
+      - test -d .terraform
+      - test -f .terraform/terraform.tfstate
+
+  workspace:
+    desc: Show the Terraform Workspace to use for planning and deployment
+    summary: |-
+      Show the Terraform Workspace which will be used to manage the specific
+      environment this configuration will be planned, and deployed, for.
+    silent: true
+    deps:
+      - task: init
+    cmds:
+      - cmd: terraform workspace show -no-color
+
+  workspace:*:
+    desc: Select the Terraform Workspace to use for planning and deployment
+    summary: |-
+      Select the Terraform Workspace which will be used to manage the specific
+      environment this configuration will be planned, and deployed, for.
+    silent: true
+    deps:
+      - task: init
+    vars:
+      target: 'vault.{{ index .MATCH 0 | trunc 1 }}.cym-south-1.kub3.uk'
+      workspace:
+        sh: terraform workspace show -no-color
+    cmds:
+      - cmd: |-
+          if [[ "{{ .workspace }}" != "{{ .target }}" ]]
+          then
+            terraform workspace select -no-color "{{ .target }}" || \
+            terraform workspace new -no-color "{{ .target }}"
+          fi
+      - cmd: |-
+          echo -n -e 'workspace: \033[0;31m{{ .target }}\033[0m '
+          if [[ -f "variables/{{ .target }}.tfvars" ]]
+          then
+            echo '[-var-file=variables/{{ .target }}.tfvars]'
+          else
+            echo '[-var-file=(none)]'
+          fi
+
+  validate:
+    desc: Validate the Terraform configuration
+    summary: |-
+      Check and validate the syntax of the Terraform configuration to ensure
+      that the code it is correct and valid.
+    silent: true
+    sources:
+      - '*.tf'
+      - 'assets/*'
+      - 'templates/*'
+    deps:
+      - task: init
+    vars:
+      workspace:
+        sh: terraform workspace show -no-color
+    cmds:
+      - cmd: |-
+          VARS=""
+          echo -n -e 'workspace: \033[0;31m{{ .workspace }}\033[0m '
+          if [[ -f "variables/{{ .workspace }}.tfvars" ]]
+          then
+            VARS="-var-file variables/{{ .workspace }}.tfvars"
+            echo '[-var-file=variables/{{ .workspace }}.tfvars]'
+          else
+            echo '[-var-file=(none)]'
+          fi
+
+          sleep 1
+          terraform validate ${VARS} -no-color
+      - cmd: |-
+          echo -e '\033[0;32mPassed\033[0m'
+
+  plan:
+    desc: Plan the changes for this Terraform configuration
+    summary: |-
+      Run Terraform against the local configuration and analyse the difference
+      between the defined state verses the current state of the configured
+      resources and create a Terraform .tfplan file.
+    silent: true
+    deps:
+      - task: validate
+    vars:
+      workspace:
+        sh: terraform workspace show -no-color
+    cmds:
+      - cmd: |-
+          VARS=""
+          echo -n -e 'workspace: \033[0;31m{{ .workspace }}\033[0m '
+          if [[ -f "variables/{{ .workspace }}.tfvars" ]]
+          then
+            VARS="-var-file variables/{{ .workspace }}.tfvars"
+            echo '[-var-file=variables/{{ .workspace }}.tfvars]'
+          else
+            echo '[-var-file=(none)]'
+          fi
+
+          sleep 1
+          terraform plan ${VARS} -no-color -out "terraform.tfplan"
+    generates:
+      - 'terraform.tfplan'
+    status:
+      - test -f terraform.tfplan
+
+  apply:
+    desc: Apply the changes for this Terraform configuration
+    summary: |-
+      Apply the changes saved in the Terraform .tfplan file against the
+      configured resources managed by this Terraform configuration.
+    silent: true
+    sources:
+      - 'terraform.tfplan'
+    deps:
+      - task: plan
+    vars:
+      workspace:
+        sh: terraform workspace show -no-color
+    cmds:
+      # The terraform.tfplan file is rendered obsolete by even a partial apply
+      # of the configuration, so must always be deleted when an apply is run
+      - defer: |-
+          rm -f terraform.tfplan
+      - cmd: |-
+          echo -n -e 'workspace: \033[0;31m{{ .workspace }}\033[0m '
+          if [[ -f "variables/{{ .workspace }}.tfvars" ]]
+          then
+              echo '[-var-file=variable/{{ .workspace }}.tfvars]'
+          else
+              echo '[-var-file=(none)]'
+          fi
+      - cmd: |-
+          terraform apply -no-color terraform.tfplan
+
+  output:
+    desc: Show the outputs for this Terraform configuration
+    summary: |-
+      Show the outputs for this Terraform configuration and the selected
+      Workspace that has been deployed.
+    silent: true
+    deps:
+      - task: init
+    vars:
+      workspace:
+        sh: terraform workspace show -no-color
+    cmds:
+      - cmd: |-
+          echo -n -e 'workspace: \033[0;31m{{ .workspace }}\033[0m '
+          if [[ -f "variables/{{ .workspace }}.tfvars" ]]
+          then
+              echo '[-var-file=variable/{{ .workspace }}.tfvars]'
+          else
+              echo '[-var-file=(none)]'
+          fi
+      - cmd: |-
+          terraform output -no-color
+
+  output:*:
+    desc: Show a selected output for this Terraform configuration
+    summary: |-
+      Show a seledcted output for this Terraform configuration and the selected
+      Workspace that has been deployed.
+    silent: true
+    deps:
+      - task: init
+    vars:
+      workspace:
+        sh: terraform workspace show -no-color
+    cmds:
+      - cmd: |-
+          echo -n -e 'workspace: \033[0;31m{{ .workspace }}\033[0m '
+          if [[ -f "variables/{{ .workspace }}.tfvars" ]]
+          then
+              echo '[-var-file=variable/{{ .workspace }}.tfvars]'
+          else
+              echo '[-var-file=(none)]'
+          fi
+      - cmd: |-
+          echo -n -e "\033[0;32m{{ index .MATCH 0 }}\033[0m = "
+      - cmd: |-
+          terraform output -no-color {{ index .MATCH 0}}
+
+  destroy:
+    summary: |-
+      Initiate a plan and apply sequence to destroy all resources previously
+      created by this Terraform configuration.
+    silent: true
+    deps:
+      - task: utils:check:terraform
+    prompt: |-
+      This task will destory any resources previously created through this
+      Terraform configuration. Are you sure you want to do this?
+    vars:
+      workspace:
+        sh: terraform workspace show -no-color
+    cmds:
+      - cmd: |-
+          echo -n -e 'workspace: \033[0;31m{{ .workspace }}\033[0m '
+          if [[ -f "variables/{{ .workspace }}.tfvars" ]]
+          then
+              echo '[-var-file=variable/{{ .workspace }}.tfvars]'
+          else
+              echo '[-var-file=(none)]'
+          fi
+
+          sleep 2
+          terraform destroy ${VARS} -no-color -auto-approve
+
+  lint:
+    desc: Lint all Terraform and associated files for this configuration
+    summary: |-
+      Run code-level checks against the Terraform configuration to ensure the
+      files are correctly and consistently formatted and potential
+      mis-configurations are avoided.
+    silent: true
+    deps:
+      - task: validate
+    cmds:
+      - task: fmt
+      - task: prettier
+      - task: markdownlint
+      - task: tflint
+      - cmd: echo -e '\033[0;32mPassed\033[0m'
+
+  fmt:
+    internal: true
+    silent: true
+    sources:
+      - '*.tf'
+      - 'tests/*.tftest.hcl'
+      - 'variables/*.tfvars'
+    deps:
+      - task: utils:check:terraform
+    cmds:
+      - cmd: |-
+          terraform fmt -no-color
+        # Make sure to use the if here rather than "test ... &&" as in the
+        # latter, if the directory does not exist the test will fail
+      - for:
+          - tests
+          - variables
+        cmd: |-
+          if test -d {{ .ITEM }}
+          then
+            terraform fmt -no-color {{ .ITEM }}
+          fi
+      - cmd: |-
+          echo -e '\033[0;32mPassed\033[0m'
+
+  prettier:
+    internal: true
+    silent: true
+    sources:
+      - '{{ .ROOT }}/.prettier.yaml'
+      - '*.md'
+      - '*.yaml'
+      - 'assets/*'
+    deps:
+      - task: utils:check:prettier
+    cmds:
+      - cmd: |-
+          prettier --log-level warn \
+            --write --config "{{ .ROOT }}/.prettier.yaml" \
+            --cache --cache-location .prettier.cache \
+            "**/*.{json,yaml,md}"
+      - cmd: |-
+          echo -e '\033[0;32mPassed\033[0m'
+
+  markdownlint:
+    internal: true
+    silent: true
+    sources:
+      - '{{ .ROOT }}/.markdownlint.yaml'
+      - '**/*.md'
+    cmds:
+      - cmd: |-
+          markdownlint \
+            --config '{{ .ROOT }}/.markdownlint.yaml' \
+            **/*.md
+
+  tflint:init:
+    internal: true
+    silent: true
+    sources:
+      - '{{ .ROOT }}/.tflint.hcl'
+    deps:
+      - task: utils:check:tflint
+    cmds:
+      - cmd: |-
+          tflint --config "{{ .ROOT }}/.tflint.hcl" --init \
+          | { grep -v 'already installed' || true; }
+
+  tflint:
+    internal: true
+    silent: true
+    sources:
+      - '{{ .ROOT }}/.tflint.hcl'
+      - '*.tf'
+      - 'assets/*'
+      - 'variables/*'
+      - 'templates/*'
+    deps:
+      - task: tflint:init
+      - task: utils:check:tflint
+    vars:
+      workspace:
+        sh: terraform workspace show -no-color
+    cmds:
+      - cmd: |-
+          VARS=""
+          echo -n -e 'workspace: \033[0;31m{{ .workspace }}\033[0m '
+          if [[ -f "variables/{{ .workspace }}.tfvars" ]]
+          then
+            VARS="--var-file variables/{{ .workspace }}.tfvars"
+            echo '[-var-file=variables/{{ .workspace }}.tfvars]'
+          else
+            echo '[-var-file=(none)]'
+          fi
+
+          tflint --config "{{ .ROOT }}/.tflint.hcl" ${VARS}
+      - cmd: |-
+          echo -e '\033[0;32mPassed\033[0m'
+
+  security:
+    desc: Run static analysis against the Terraform configuration
+    summary: |-
+      Run static code analysis tools against this Terraform configuration to
+      identify mis-configurations and security issues within the code.
+    silent: true
+    deps:
+      - task: trivy
+
+  trivy:
+    internal: true
+    silent: true
+    sources:
+      - '{{ .ROOT }}/.trivy.yaml'
+      - '*.tf'
+      - 'assets/*'
+      - 'templates/*'
+    deps:
+      - task: utils:check:trivy
+    cmds:
+      - cmd: |-
+          trivy \
+              --quiet \
+              --config "{{ .ROOT }}/.trivy.yaml" \
+            filesystem . \
+            2> >(grep -v INFO)
+      - cmd: |-
+          echo -e '\033[0;32mPassed\033[0m'
+
+  documentation:
+    desc: Update the README.md file with terraform-docs
+    summary: |-
+      Update the README.md file with a summary of the Terraform configuration,
+      including information about the requirements, variables and outputs, as
+      well as the resources created, using terraform-docs.
+    silent: true
+    sources:
+      - '{{ .ROOT }}/.terraform-docs.yaml'
+      - '*.tf'
+    deps:
+      - task: utils:check:terraform-docs
+    cmds:
+      - cmd: |-
+          terraform-docs --config "{{ .ROOT }}/.terraform-docs.yaml" .
+
+  test:
+    desc: Run tests against the Terraform configuration
+    summary: |-
+      Run unit and integration tests against the Terraform configuration to
+      ensure that any code or deployable resources are valid and correct.
+    silent: true
+    sources:
+      - '*.tf'
+      - 'tests/*.tftest.hcl'
+      - 'assets/*'
+      - 'templates/*'
+      - 'variables/*'
+    deps:
+      - task: validate
+    vars:
+      workspace:
+        sh: terraform workspace show -no-color
+    cmds:
+      - cmd: |-
+          VARS=""
+          echo -n -e 'workspace: \033[0;31m{{ .workspace }}\033[0m '
+          if [[ -f "variables/{{ .workspace }}.tfvars" ]]
+          then
+            VARS="-var-file variables/{{ .workspace }}.tfvars"
+            echo '[-var-file=variables/{{ .workspace }}.tfvars]'
+          else
+            echo '[-var-file=(none)]'
+          fi
+
+          terraform test ${VARS} -no-color
+      - cmd: |-
+          echo -e '\033[0;32mPassed\033[0m'
+
+  clean:
+    desc: Clean temporary directories and files from this configuration
+    summary: |
+      Clean any temporary directories and files created by both this Taskfile,
+      and the tools and applications called from it within this configuration.
+    silent: true
+    run: once
+    cmds:
+      - cmd: rm -f terraform.tfplan
+      - cmd: rm -rf .terraform/{providers,*.tfstate*}
+      - cmd: rm -rf .task

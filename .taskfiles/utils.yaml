@@ -15,6 +15,10 @@ tasks:
     deps:
       - task: check:pre-commit
       - task: check:prettier
+      - task: check:tflint
+      - task: check:terraform
+      - task: check:terraform-docs
+      - task: check:trivy
 
   # Run a check for a specific executable to ensure it's available within $PATH
   check:*:

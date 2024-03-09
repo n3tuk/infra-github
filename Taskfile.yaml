@@ -27,6 +27,28 @@ tasks:
       - task: clean
     cmds:
       - task: lint
+      - task: validate
+      - task: security
+      - task: test
+      - task: documentation
+
+  workspace:*:
+    desc: Select the Terraform Workspace to use for planning and deployment
+    summary: |-
+      Select the Terraform Workspaces which will be used to manage the specific
+      environmens these configurations will be planned, and deployed, for.
+    silent: true
+    cmds:
+      - task: terraform:workspace:{{ index .MATCH 0 }}
+
+  validate:
+    desc: Validate the Terraform configuration
+    summary: |-
+      Check and validate the syntax of the Terraform configurations to ensure
+      that the code it is correct and valid.
+    deps:
+      - task: terraform:validate
+    silent: true
 
   lint:
     desc: Lint all Terraform amd associated files within this repository
@@ -35,6 +57,7 @@ tasks:
       to find any potential issues with the configurations before run-time.
     silent: true
     deps:
+      - task: terraform:lint
       - task: prettier
       - task: markdownlint
 
@@ -102,4 +125,5 @@ tasks:
     silent: true
     run: once
     cmds:
+      - task: terraform:clean
       - cmd: rm -rf .task

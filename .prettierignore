@@ -1,0 +1,15 @@
+# Ignore any Node-related temporary files
+node_modules/*
+
+# Ignore Taskfile processing directory
+.task/*
+
+# Ignore temporary Terraform files and directories
+terraform/.terraform/*
+
+# Ignore the Prettier cache file
+.prettier.cache
+
+# Ignore the Pull Request template file as this is not a complete document, just
+# a partial document for inclusion by GitHub
+.github/PULL_REQUEST_TEMPLATE.md

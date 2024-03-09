@@ -1,0 +1,105 @@
+---
+version: 3
+output: prefixed
+interval: 2000ms
+
+includes:
+  utils:
+    taskfile: .taskfiles/utils.yaml
+    internal: true
+  terraform:
+    taskfile: terraform/Taskfile.yaml
+    dir: terraform
+
+tasks:
+  develop:
+    desc: Continiously run the development and integration tasks in the background
+    summary: |-
+      Clean (once) the environment and then continiously run the development and
+      integration tasks in the background for all configurations, testing and
+      checking any changes made while the code is changed, and keeping the
+      documentation up-to-date.
+    silent: true
+    watch: true
+    deps:
+      - task: utils:pre-commit
+      - task: utils:pre-checks
+      - task: clean
+    cmds:
+      - task: lint
+
+  lint:
+    desc: Lint all Terraform amd associated files within this repository
+    summary: |-
+      Run checks across the Terraform configurations, as well as the repository,
+      to find any potential issues with the configurations before run-time.
+    silent: true
+    deps:
+      - task: prettier
+      - task: markdownlint
+
+  prettier:
+    internal: true
+    silent: true
+    sources:
+      - '.prettier.yaml'
+      - '**/*.json'
+      - '**/*.yaml'
+      - '**/*.md'
+    cmds:
+      - cmd: |-
+          prettier --log-level warn \
+            --write --config .prettier.yaml \
+            --cache --cache-location .prettier.cache \
+            "**/*.{json,yaml,md}"
+
+  markdownlint:
+    internal: true
+    silent: true
+    sources:
+      - '.markdownlint.yaml'
+      - '*.md'
+    cmds:
+      - cmd: |-
+          markdownlint \
+            --config .markdownlint.yaml \
+            *.md
+
+  security:
+    desc: Run static analysis against Terraform configurations
+    summary: |-
+      Run static analysis tools across the Terraform configurations to find any
+      bad configurations or potential security issues.
+    silent: true
+    deps:
+      - task: terraform:security
+
+  documentation:
+    desc: Update README.md files with terraform-docs
+    summary: |-
+      Update all README.md files in this Terraform configuration using
+      terraform-docs to ensure that all documentation is up-to-date with the
+      current configuration.
+    silent: true
+    deps:
+      - task: terraform:documentation
+
+  test:
+    desc: Run tests against Terraform configurations
+    summary: |-
+      Run unit and integration tests against all the Terraform configurations to
+      ensure that any code or deployable resources are valid and correct.
+    silent: true
+    deps:
+      - task: terraform:test
+
+  clean:
+    desc: Clean temporary files from the repository and configurations
+    summary: |-
+      Clean any temporary directories and files created by both this Taskfile,
+      and the tools and applications called from it, and from within the
+      configurations.
+    silent: true
+    run: once
+    cmds:
+      - cmd: rm -rf .task

@@ -1,0 +1,46 @@
+---
+version: 3
+
+vars:
+  ROOT:
+    sh: git rev-parse --show-toplevel
+
+tasks:
+  # Run checks within the local environment to find out if the required tools
+  # exist, and if not exit from running any further with an explanation
+  pre-checks:
+    internal: true
+    silent: true
+    run: once
+    deps:
+      - task: check:pre-commit
+      - task: check:prettier
+
+  # Run a check for a specific executable to ensure it's available within $PATH
+  check:*:
+    internal: true
+    silent: true
+    run: once
+    cmds:
+      - cmd: |-
+          test -x "$(which {{ index .MATCH 0 }} 2>/dev/null)" \
+            || ( echo 'check failed: Cannot find {{ index .MATCH 0 }} in $PATH.'
+                 exit 1 )
+    status:
+      # Set this file to bypass all checks (only use if you know what you're doing)
+      - test -f {{ .ROOT }}/.skip-pre-checks
+
+  pre-commit:
+    internal: true
+    silent: true
+    run: once
+    deps:
+      - task: check:pre-commit
+    cmds:
+      # Avoid outputting anything from this command
+      - cmd: |-
+          pre-commit install >/dev/null 2>&1
+    generates:
+      - '.git/hooks/pre-commit'
+    status:
+      - test -f '.git/hooks/pre-commit'

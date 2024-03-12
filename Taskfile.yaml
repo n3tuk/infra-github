@@ -23,11 +23,10 @@ tasks:
     watch: true
     deps:
       - task: utils:pre-commit
-      - task: utils:pre-checks
       - task: clean
     cmds:
-      - task: lint
       - task: validate
+      - task: lint
       - task: security
       - task: test
       - task: documentation
@@ -38,7 +37,7 @@ tasks:
       Select the Terraform Workspaces which will be used to manage the specific
       environmens these configurations will be planned, and deployed, for.
     silent: true
-    cmds:
+    deps:
       - task: terraform:workspace:{{ index .MATCH 0 }}
 
   validate:
@@ -69,12 +68,16 @@ tasks:
       - '**/*.json'
       - '**/*.yaml'
       - '**/*.md'
+    deps:
+      - task: utils:check:prettier
     cmds:
       - cmd: |-
           prettier --log-level warn \
             --write --config .prettier.yaml \
             --cache --cache-location .prettier.cache \
             "**/*.{json,yaml,md}"
+      - cmd: |-
+          echo -e '\033[0;32mPassed\033[0m'
 
   markdownlint:
     internal: true
@@ -82,11 +85,15 @@ tasks:
     sources:
       - '.markdownlint.yaml'
       - '*.md'
+    deps:
+      - task: utils:check:markdownlint
     cmds:
       - cmd: |-
           markdownlint \
             --config .markdownlint.yaml \
             *.md
+      - cmd: |-
+          echo -e "\033[0;32mPassed\033[0m"
 
   security:
     desc: Run static analysis against Terraform configurations

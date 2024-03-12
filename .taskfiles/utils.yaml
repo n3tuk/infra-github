@@ -15,6 +15,7 @@ tasks:
     deps:
       - task: check:pre-commit
       - task: check:prettier
+      - task: check:markdownlint
       - task: check:tflint
       - task: check:terraform
       - task: check:terraform-docs

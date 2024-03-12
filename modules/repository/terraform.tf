@@ -1,5 +1,5 @@
 terraform {
-  required_version = "~> 1.7.0"
+  required_version = "~> 1.7"
 
   required_providers {
     github = {
@@ -15,11 +15,4 @@ terraform {
       version = "~> 3.6"
     }
   }
-
-  backend "gcs" {
-    bucket = "n3tuk-genuine-caiman-terraform-states"
-    prefix = "github/n3tuk/infra-github"
-  }
 }
-
-locals {}

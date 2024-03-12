@@ -1,0 +1,182 @@
+---
+version: 3
+output: prefixed
+interval: 2000ms
+
+includes:
+  utils:
+    taskfile: 'utils.yaml'
+    internal: true
+
+tasks:
+  develop:
+    desc: Continiously run the development and integration tasks in the background
+    summary: |-
+      Clean (once) the environment and then continiously run the development and
+      integration tasks in the background, testing and checking any changes made
+      while the code is changed, and keeping the documentation up-to-date.
+    watch: true
+    silent: true
+    deps:
+      - task: utils:pre-checks
+      - task: clean
+    cmds:
+      - task: lint
+      - task: security
+      - task: documentation
+
+  lint:
+    desc: Lint all Terraform and associated files for this configuration
+    summary: |-
+      Run code-level checks against the Terraform configuration to ensure the
+      files are correctly and consistently formatted and potential
+      mis-configurations are avoided.
+    silent: true
+    cmds:
+      - task: fmt
+      - task: prettier
+      - task: markdownlint
+      - task: tflint
+      - cmd: echo -e '\033[0;32mPassed\033[0m'
+
+  fmt:
+    internal: true
+    silent: true
+    sources:
+      - '*.tf'
+      - '.tflint.tfvars'
+      - 'tests/*.tftest.hcl'
+    deps:
+      - task: utils:check:terraform
+    cmds:
+      - cmd: |-
+          terraform fmt -no-color
+      - for:
+          - tests
+        # Make sure to use the if here rather than "test ... &&" as in the
+        # latter case, if the directory does not exist the test will fail
+        cmd: |-
+          if test -d {{ .ITEM }}
+          then
+            terraform fmt -no-color {{ .ITEM }}
+          fi
+      - cmd: |-
+          echo -e '\033[0;32mPassed\033[0m'
+
+  prettier:
+    internal: true
+    silent: true
+    sources:
+      - '../../.prettier.yaml'
+      - '*.md'
+      - '*.yaml'
+      - 'assets/*'
+    deps:
+      - task: utils:check:prettier
+    cmds:
+      - cmd: |-
+          prettier --log-level warn \
+            --write --config ../../.prettier.yaml \
+            --cache --cache-location .prettier.cache \
+            "**/*.{json,yaml,md}"
+      - cmd: |-
+          echo -e '\033[0;32mPassed\033[0m'
+
+  markdownlint:
+    internal: true
+    silent: true
+    sources:
+      - '../../.markdownlint.yaml'
+      - '**/*.md'
+    cmds:
+      - cmd: |-
+          markdownlint \
+            --config ../../.markdownlint.yaml \
+            **/*.md
+
+  tflint:init:
+    internal: true
+    silent: true
+    sources:
+      - '../../.tflint.hcl'
+    deps:
+      - task: utils:check:tflint
+    cmds:
+      - cmd: |-
+          tflint --config ../../.tflint.hcl --init \
+          | { grep -v 'already installed' || true; }
+
+  tflint:
+    internal: true
+    silent: true
+    sources:
+      - '../../.tflint.hcl'
+      - '.tflint.tfvars'
+      - '*.tf'
+      - 'assets/*'
+      - 'templates/*'
+    deps:
+      - task: tflint:init
+      - task: utils:check:tflint
+    cmds:
+      - cmd: |-
+          tflint --config ../../.tflint.hcl --var-file .tflint.tfvars
+      - cmd: |-
+          echo -e '\033[0;32mPassed\033[0m'
+
+  security:
+    desc: Run static analysis against the Terraform configuration
+    summary: |-
+      Run static code analysis tools against this Terraform configuration to
+      identify mis-configurations and security issues within the code.
+    silent: true
+    deps:
+      - task: trivy
+
+  trivy:
+    internal: true
+    silent: true
+    sources:
+      - '../../.trivy.yaml'
+      - '../../.trivyignore'
+      - '*.tf'
+      - 'assets/*'
+      - 'templates/*'
+    deps:
+      - task: utils:check:trivy
+    cmds:
+      - cmd: |-
+          trivy \
+              --quiet \
+              --config ../../.trivy.yaml \
+              --ignorefile "../../.trivyignore" \
+            filesystem . \
+            2> >(grep -v INFO)
+      - cmd: |-
+          echo -e '\033[0;32mPassed\033[0m'
+
+  documentation:
+    desc: Update the README.md file with terraform-docs
+    summary: |-
+      Update the README.md file with a summary of the Terraform configuration,
+      including information about the requirements, variables and outputs, as
+      well as the resources created, using terraform-docs.
+    silent: true
+    sources:
+      - '../../.terraform-docs.yaml'
+      - '*.tf'
+    deps:
+      - task: utils:check:terraform-docs
+    cmds:
+      - cmd: |-
+          terraform-docs --config ../../.terraform-docs.yaml .
+
+  clean:
+    desc: Clean temporary directories and files from this configuration
+    summary: |
+      Clean any temporary directories and files created by both this Taskfile,
+      and the tools and applications called from it within this configuration.
+    silent: true
+    run: once
+    cmds:
+      - cmd: rm -rf .task

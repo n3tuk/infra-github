@@ -46,30 +46,36 @@ repos:
         name: Check Terraform configuration formatting
 
       - id: terraform_validate
-        name: Validate the bootstrap Terraform configuration
-        files: ^terraform/bootstrap/
+        name: Validate the Terraform configuration
+        files: ^terraform/
         args:
           - --tf-init-args=-no-color
           - --tf-init-args=-upgrade
           - --tf-init-args=-get
           - --hook-config=--retry-once-with-cleanup=true
+
       - id: terraform_tflint
-        name: Lint the bootstrap Terraform configuration
+        name: Lint the Terraform configuration
         files: ^terraform/
         args:
           - --args=--config=__GIT_WORKING_DIR__/.tflint.hcl
+      - id: terraform_tflint
+        name: Lint the Terraform modules
+        files: ^modules/
+        args:
+          - --args=--config=__GIT_WORKING_DIR__/.tflint.hcl
+
       - id: terraform_trivy
-        name: Analyse the bootstrap Terraform configuration
+        name: Analyse the Terraform configuration
         files: ^terraform/
         args:
           - --args=--config=__GIT_WORKING_DIR__/.trivy.yaml
+          - --args=--ignorefile=__GIT_WORKING_DIR__/.trivyignore
 
       - id: terraform_providers_lock
         name: Check Terraform Provider plaforms configured
         args:
           - --args=-platform=linux_amd64
-          - --args=-platform=linux_arm64
-          - --args=-platform=darwin_amd64
           - --args=-platform=darwin_arm64
 
       - id: terraform_docs

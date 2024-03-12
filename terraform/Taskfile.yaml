@@ -4,7 +4,7 @@ output: prefixed
 interval: 2000ms
 
 vars:
-  ROOT:
+  root:
     sh: git rev-parse --show-toplevel
 
 includes:
@@ -50,13 +50,6 @@ tasks:
           terraform init \
             -no-color \
             -upgrade -get
-      - cmd: |-
-          terraform providers lock \
-            -no-color \
-            -platform=linux_amd64 \
-            -platform=linux_arm64 \
-            -platform=darwin_amd64 \
-            -platform=darwin_arm64
     status:
       - test -d .terraform
       - test -f .terraform/terraform.tfstate
@@ -84,6 +77,12 @@ tasks:
       target: 'vault.{{ index .MATCH 0 | trunc 1 }}.cym-south-1.kub3.uk'
       workspace:
         sh: terraform workspace show -no-color
+      options:
+        sh: |-
+          if [[ -f "variables/{{ .workspace }}.tfvars" ]]
+          then
+            echo "-var-file=variables/{{ .workspace }}.tfvars"
+          fi
     cmds:
       - cmd: |-
           if [[ "{{ .workspace }}" != "{{ .target }}" ]]
@@ -92,13 +91,7 @@ tasks:
             terraform workspace new -no-color "{{ .target }}"
           fi
       - cmd: |-
-          echo -n -e 'workspace: \033[0;31m{{ .target }}\033[0m '
-          if [[ -f "variables/{{ .target }}.tfvars" ]]
-          then
-            echo '[-var-file=variables/{{ .target }}.tfvars]'
-          else
-            echo '[-var-file=(none)]'
-          fi
+          echo -e "workspace: \033[0;31m{{ .target }}\033[0m [{{ default "(none)" .options }}]"
 
   validate:
     desc: Validate the Terraform configuration
@@ -115,22 +108,19 @@ tasks:
     vars:
       workspace:
         sh: terraform workspace show -no-color
-    cmds:
-      - cmd: |-
-          VARS=""
-          echo -n -e 'workspace: \033[0;31m{{ .workspace }}\033[0m '
+      options:
+        sh: |-
           if [[ -f "variables/{{ .workspace }}.tfvars" ]]
           then
-            VARS="-var-file variables/{{ .workspace }}.tfvars"
-            echo '[-var-file=variables/{{ .workspace }}.tfvars]'
-          else
-            echo '[-var-file=(none)]'
+            echo "-var-file=variables/{{ .workspace }}.tfvars"
           fi
-
-          sleep 1
-          terraform validate ${VARS} -no-color
+    cmds:
       - cmd: |-
-          echo -e '\033[0;32mPassed\033[0m'
+          echo -e "workspace: \033[0;31m{{ .workspace }}\033[0m [{{ default "(none)" .options }}]"
+      - cmd: |-
+          terraform validate -no-color {{ .options }}
+      - cmd: |-
+          echo -e "\033[0;32mPassed\033[0m"
 
   plan:
     desc: Plan the changes for this Terraform configuration
@@ -144,20 +134,19 @@ tasks:
     vars:
       workspace:
         sh: terraform workspace show -no-color
-    cmds:
-      - cmd: |-
-          VARS=""
-          echo -n -e 'workspace: \033[0;31m{{ .workspace }}\033[0m '
+      options:
+        sh: |-
           if [[ -f "variables/{{ .workspace }}.tfvars" ]]
           then
-            VARS="-var-file variables/{{ .workspace }}.tfvars"
-            echo '[-var-file=variables/{{ .workspace }}.tfvars]'
-          else
-            echo '[-var-file=(none)]'
+            echo "-var-file=variables/{{ .workspace }}.tfvars"
           fi
-
-          sleep 1
-          terraform plan ${VARS} -no-color -out "terraform.tfplan"
+    cmds:
+      - cmd: |-
+          echo -e "workspace: \033[0;31m{{ .workspace }}\033[0m [{{ default "(none)" .options }}]"
+      - cmd: |-
+          terraform plan -no-color {{ .options }} -out "terraform.tfplan"
+      - cmd: |-
+          echo -e "\033[0;32mPassed\033[0m"
     generates:
       - 'terraform.tfplan'
     status:
@@ -176,21 +165,23 @@ tasks:
     vars:
       workspace:
         sh: terraform workspace show -no-color
+      options:
+        sh: |-
+          if [[ -f "variables/{{ .workspace }}.tfvars" ]]
+          then
+            echo "-var-file=variables/{{ .workspace }}.tfvars"
+          fi
     cmds:
       # The terraform.tfplan file is rendered obsolete by even a partial apply
       # of the configuration, so must always be deleted when an apply is run
       - defer: |-
           rm -f terraform.tfplan
       - cmd: |-
-          echo -n -e 'workspace: \033[0;31m{{ .workspace }}\033[0m '
-          if [[ -f "variables/{{ .workspace }}.tfvars" ]]
-          then
-              echo '[-var-file=variable/{{ .workspace }}.tfvars]'
-          else
-              echo '[-var-file=(none)]'
-          fi
+          echo -e "workspace: \033[0;31m{{ .workspace }}\033[0m [{{ default "(none)" .options }}]"
       - cmd: |-
           terraform apply -no-color terraform.tfplan
+      - cmd: |-
+          echo -e "\033[0;32mPassed\033[0m"
 
   output:
     desc: Show the outputs for this Terraform configuration
@@ -203,15 +194,15 @@ tasks:
     vars:
       workspace:
         sh: terraform workspace show -no-color
-    cmds:
-      - cmd: |-
-          echo -n -e 'workspace: \033[0;31m{{ .workspace }}\033[0m '
+      options:
+        sh: |-
           if [[ -f "variables/{{ .workspace }}.tfvars" ]]
           then
-              echo '[-var-file=variable/{{ .workspace }}.tfvars]'
-          else
-              echo '[-var-file=(none)]'
+            echo "-var-file=variables/{{ .workspace }}.tfvars"
           fi
+    cmds:
+      - cmd: |-
+          echo -e "workspace: \033[0;31m{{ .workspace }}\033[0m [{{ default "(none)" .options }}]"
       - cmd: |-
           terraform output -no-color
 
@@ -226,15 +217,15 @@ tasks:
     vars:
       workspace:
         sh: terraform workspace show -no-color
-    cmds:
-      - cmd: |-
-          echo -n -e 'workspace: \033[0;31m{{ .workspace }}\033[0m '
+      options:
+        sh: |-
           if [[ -f "variables/{{ .workspace }}.tfvars" ]]
           then
-              echo '[-var-file=variable/{{ .workspace }}.tfvars]'
-          else
-              echo '[-var-file=(none)]'
+            echo "-var-file=variables/{{ .workspace }}.tfvars"
           fi
+    cmds:
+      - cmd: |-
+          echo -e "workspace: \033[0;31m{{ .workspace }}\033[0m [{{ default "(none)" .options }}]"
       - cmd: |-
           echo -n -e "\033[0;32m{{ index .MATCH 0 }}\033[0m = "
       - cmd: |-
@@ -253,18 +244,19 @@ tasks:
     vars:
       workspace:
         sh: terraform workspace show -no-color
-    cmds:
-      - cmd: |-
-          echo -n -e 'workspace: \033[0;31m{{ .workspace }}\033[0m '
+      options:
+        sh: |-
           if [[ -f "variables/{{ .workspace }}.tfvars" ]]
           then
-              echo '[-var-file=variable/{{ .workspace }}.tfvars]'
-          else
-              echo '[-var-file=(none)]'
+            echo "-var-file=variables/{{ .workspace }}.tfvars"
           fi
-
-          sleep 2
-          terraform destroy ${VARS} -no-color -auto-approve
+    cmds:
+      - cmd: |-
+          echo -e "workspace: \033[0;31m{{ .workspace }}\033[0m [{{ default "(none)" .options }}]"
+      - cmd: |-
+          terraform destroy -no-color {{ .options }} -auto-approve
+      - cmd: |-
+          echo -e "\033[0;32mPassed\033[0m"
 
   lint:
     desc: Lint all Terraform and associated files for this configuration
@@ -277,10 +269,10 @@ tasks:
       - task: validate
     cmds:
       - task: fmt
+      - task: tflint
       - task: prettier
       - task: markdownlint
-      - task: tflint
-      - cmd: echo -e '\033[0;32mPassed\033[0m'
+      - cmd: echo -e "\033[0;32mPassed\033[0m"
 
   fmt:
     internal: true
@@ -294,24 +286,24 @@ tasks:
     cmds:
       - cmd: |-
           terraform fmt -no-color
-        # Make sure to use the if here rather than "test ... &&" as in the
-        # latter, if the directory does not exist the test will fail
       - for:
           - tests
           - variables
+        # Make sure to use the if here rather than "test ... &&" as in the
+        # latter case, if the directory does not exist the test will fail
         cmd: |-
-          if test -d {{ .ITEM }}
+          if test -d "{{ .ITEM }}"
           then
-            terraform fmt -no-color {{ .ITEM }}
+            terraform fmt -no-color "{{ .ITEM }}"
           fi
       - cmd: |-
-          echo -e '\033[0;32mPassed\033[0m'
+          echo -e "\033[0;32mPassed\033[0m"
 
   prettier:
     internal: true
     silent: true
     sources:
-      - '{{ .ROOT }}/.prettier.yaml'
+      - '{{ .root }}/.prettier.yaml'
       - '*.md'
       - '*.yaml'
       - 'assets/*'
@@ -320,41 +312,45 @@ tasks:
     cmds:
       - cmd: |-
           prettier --log-level warn \
-            --write --config "{{ .ROOT }}/.prettier.yaml" \
+            --write --config "{{ .root }}/.prettier.yaml" \
             --cache --cache-location .prettier.cache \
             "**/*.{json,yaml,md}"
       - cmd: |-
-          echo -e '\033[0;32mPassed\033[0m'
+          echo -e "\033[0;32mPassed\033[0m"
 
   markdownlint:
     internal: true
     silent: true
     sources:
-      - '{{ .ROOT }}/.markdownlint.yaml'
+      - '{{ .root }}/.markdownlint.yaml'
       - '**/*.md'
+    deps:
+      - task: utils:check:markdownlint
     cmds:
       - cmd: |-
           markdownlint \
-            --config '{{ .ROOT }}/.markdownlint.yaml' \
+            --config "{{ .root }}/.markdownlint.yaml" \
             **/*.md
+      - cmd: |-
+          echo -e '\033[0;32mPassed\033[0m'
 
   tflint:init:
     internal: true
     silent: true
     sources:
-      - '{{ .ROOT }}/.tflint.hcl'
+      - '{{ .root }}/.tflint.hcl'
     deps:
       - task: utils:check:tflint
     cmds:
       - cmd: |-
-          tflint --config "{{ .ROOT }}/.tflint.hcl" --init \
-          | { grep -v 'already installed' || true; }
+          tflint --config "{{ .root }}/.tflint.hcl" --init \
+          | { grep -v "already installed" || true; }
 
   tflint:
     internal: true
     silent: true
     sources:
-      - '{{ .ROOT }}/.tflint.hcl'
+      - '{{ .root }}/.tflint.hcl'
       - '*.tf'
       - 'assets/*'
       - 'variables/*'
@@ -365,21 +361,19 @@ tasks:
     vars:
       workspace:
         sh: terraform workspace show -no-color
-    cmds:
-      - cmd: |-
-          VARS=""
-          echo -n -e 'workspace: \033[0;31m{{ .workspace }}\033[0m '
+      options:
+        sh: |-
           if [[ -f "variables/{{ .workspace }}.tfvars" ]]
           then
-            VARS="--var-file variables/{{ .workspace }}.tfvars"
-            echo '[-var-file=variables/{{ .workspace }}.tfvars]'
-          else
-            echo '[-var-file=(none)]'
+            echo "--var-file=variables/{{ .workspace }}.tfvars"
           fi
-
-          tflint --config "{{ .ROOT }}/.tflint.hcl" ${VARS}
+    cmds:
       - cmd: |-
-          echo -e '\033[0;32mPassed\033[0m'
+          echo -e "workspace: \033[0;31m{{ .workspace }}\033[0m [{{ default "(none)" .options }}]"
+      - cmd: |-
+          tflint --config "{{ .root }}/.tflint.hcl" {{ .options }}
+      - cmd: |-
+          echo -e "\033[0;32mPassed\033[0m"
 
   security:
     desc: Run static analysis against the Terraform configuration
@@ -387,14 +381,15 @@ tasks:
       Run static code analysis tools against this Terraform configuration to
       identify mis-configurations and security issues within the code.
     silent: true
-    deps:
+    cmds:
       - task: trivy
 
   trivy:
     internal: true
     silent: true
     sources:
-      - '{{ .ROOT }}/.trivy.yaml'
+      - '{{ .root }}/.trivy.yaml'
+      - '{{ .root }}/.trivyignore'
       - '*.tf'
       - 'assets/*'
       - 'templates/*'
@@ -404,11 +399,12 @@ tasks:
       - cmd: |-
           trivy \
               --quiet \
-              --config "{{ .ROOT }}/.trivy.yaml" \
+              --config "{{ .root }}/.trivy.yaml" \
+              --ignorefile "{{ .root }}/.trivyignore" \
             filesystem . \
             2> >(grep -v INFO)
       - cmd: |-
-          echo -e '\033[0;32mPassed\033[0m'
+          echo -e "\033[0;32mPassed\033[0m"
 
   documentation:
     desc: Update the README.md file with terraform-docs
@@ -418,13 +414,14 @@ tasks:
       well as the resources created, using terraform-docs.
     silent: true
     sources:
-      - '{{ .ROOT }}/.terraform-docs.yaml'
+      - '{{ .root }}/.terraform-docs.yaml'
       - '*.tf'
     deps:
       - task: utils:check:terraform-docs
     cmds:
       - cmd: |-
-          terraform-docs --config "{{ .ROOT }}/.terraform-docs.yaml" .
+          terraform-docs --config "{{ .root }}/.terraform-docs.yaml" .
+      - task: markdownlint
 
   test:
     desc: Run tests against the Terraform configuration
@@ -443,21 +440,19 @@ tasks:
     vars:
       workspace:
         sh: terraform workspace show -no-color
-    cmds:
-      - cmd: |-
-          VARS=""
-          echo -n -e 'workspace: \033[0;31m{{ .workspace }}\033[0m '
+      options:
+        sh: |-
           if [[ -f "variables/{{ .workspace }}.tfvars" ]]
           then
-            VARS="-var-file variables/{{ .workspace }}.tfvars"
-            echo '[-var-file=variables/{{ .workspace }}.tfvars]'
-          else
-            echo '[-var-file=(none)]'
+            echo "-var-file=variables/{{ .workspace }}.tfvars"
           fi
-
-          terraform test ${VARS} -no-color
+    cmds:
       - cmd: |-
-          echo -e '\033[0;32mPassed\033[0m'
+          echo -e "workspace: \033[0;31m{{ .workspace }}\033[0m [{{ default "(none)" .options }}]"
+      - cmd: |-
+          terraform test -no-color {{ .options }}
+      - cmd: |-
+          echo -e "\033[0;32mPassed\033[0m"
 
   clean:
     desc: Clean temporary directories and files from this configuration
@@ -468,5 +463,5 @@ tasks:
     run: once
     cmds:
       - cmd: rm -f terraform.tfplan
-      - cmd: rm -rf .terraform/{providers,*.tfstate*}
+      - cmd: rm -rf .terraform/{providers,modules,*.tfstate*}
       - cmd: rm -rf .task

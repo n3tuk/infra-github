@@ -3,14 +3,14 @@ version: 3
 output: prefixed
 interval: 2000ms
 
-vars:
-  root:
-    sh: git rev-parse --show-toplevel
-
 includes:
   utils:
     taskfile: '../.taskfiles/utils.yaml'
     internal: true
+
+vars:
+  root:
+    sh: git rev-parse --show-toplevel
 
 tasks:
   develop:
@@ -50,6 +50,11 @@ tasks:
           terraform init \
             -no-color \
             -upgrade -get
+      - cmd: |-
+          terraform providers lock \
+            -no-color \
+            -platform=linux_amd64 \
+            -platform=darwin_arm64
     status:
       - test -d .terraform
       - test -f .terraform/terraform.tfstate
@@ -145,9 +150,6 @@ tasks:
           echo -e "workspace: \033[0;31m{{ .workspace }}\033[0m [{{ default "(none)" .options }}]"
       - cmd: |-
           terraform plan -no-color {{ .options }} -out "terraform.tfplan"
-      - cmd: |-
-          echo -e "\033[0;32mPassed\033[0m"
-    generates:
       - 'terraform.tfplan'
     status:
       - test -f terraform.tfplan
@@ -180,8 +182,6 @@ tasks:
           echo -e "workspace: \033[0;31m{{ .workspace }}\033[0m [{{ default "(none)" .options }}]"
       - cmd: |-
           terraform apply -no-color terraform.tfplan
-      - cmd: |-
-          echo -e "\033[0;32mPassed\033[0m"
 
   output:
     desc: Show the outputs for this Terraform configuration
@@ -255,8 +255,6 @@ tasks:
           echo -e "workspace: \033[0;31m{{ .workspace }}\033[0m [{{ default "(none)" .options }}]"
       - cmd: |-
           terraform destroy -no-color {{ .options }} -auto-approve
-      - cmd: |-
-          echo -e "\033[0;32mPassed\033[0m"
 
   lint:
     desc: Lint all Terraform and associated files for this configuration
@@ -270,9 +268,6 @@ tasks:
     cmds:
       - task: fmt
       - task: tflint
-      - task: prettier
-      - task: markdownlint
-      - cmd: echo -e "\033[0;32mPassed\033[0m"
 
   fmt:
     internal: true
@@ -298,41 +293,6 @@ tasks:
           fi
       - cmd: |-
           echo -e "\033[0;32mPassed\033[0m"
-
-  prettier:
-    internal: true
-    silent: true
-    sources:
-      - '{{ .root }}/.prettier.yaml'
-      - '*.md'
-      - '*.yaml'
-      - 'assets/*'
-    deps:
-      - task: utils:check:prettier
-    cmds:
-      - cmd: |-
-          prettier --log-level warn \
-            --write --config "{{ .root }}/.prettier.yaml" \
-            --cache --cache-location .prettier.cache \
-            "**/*.{json,yaml,md}"
-      - cmd: |-
-          echo -e "\033[0;32mPassed\033[0m"
-
-  markdownlint:
-    internal: true
-    silent: true
-    sources:
-      - '{{ .root }}/.markdownlint.yaml'
-      - '**/*.md'
-    deps:
-      - task: utils:check:markdownlint
-    cmds:
-      - cmd: |-
-          markdownlint \
-            --config "{{ .root }}/.markdownlint.yaml" \
-            **/*.md
-      - cmd: |-
-          echo -e '\033[0;32mPassed\033[0m'
 
   tflint:init:
     internal: true
@@ -398,9 +358,9 @@ tasks:
     cmds:
       - cmd: |-
           trivy \
-              --quiet \
-              --config "{{ .root }}/.trivy.yaml" \
-              --ignorefile "{{ .root }}/.trivyignore" \
+            --quiet \
+            --config "{{ .root }}/.trivy.yaml" \
+            --ignorefile "{{ .root }}/.trivyignore" \
             filesystem . \
             2> >(grep -v INFO)
       - cmd: |-
@@ -421,7 +381,6 @@ tasks:
     cmds:
       - cmd: |-
           terraform-docs --config "{{ .root }}/.terraform-docs.yaml" .
-      - task: markdownlint
 
   test:
     desc: Run tests against the Terraform configuration
@@ -463,5 +422,8 @@ tasks:
     run: once
     cmds:
       - cmd: rm -f terraform.tfplan
-      - cmd: rm -rf .terraform/{providers,modules,*.tfstate*}
+      - cmd: rm -f .terraform/*.tfstate*
+      - cmd: rm -rf .terraform/modules
+      - cmd: rm -rf .terraform/providers
+      - cmd: rm -f .prettiercache
       - cmd: rm -rf .task

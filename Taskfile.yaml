@@ -1,7 +1,10 @@
 ---
 version: 3
 output: prefixed
-interval: 2000ms
+# Increase the value for the watch interval to take into account that running
+# the Terraform initialisation normally takes longer than the default interval,
+# and as such the context will be cancelled and the command interrupted
+interval: 20s
 
 includes:
   utils:
@@ -10,6 +13,10 @@ includes:
   terraform:
     taskfile: terraform/Taskfile.yaml
     dir: terraform
+
+vars:
+  root:
+    sh: git rev-parse --show-toplevel
 
 tasks:
   develop:
@@ -31,51 +38,69 @@ tasks:
       - task: test
       - task: documentation
 
-  workspace:*:
-    desc: Select the Terraform Workspace to use for planning and deployment
-    summary: |-
-      Select the Terraform Workspaces which will be used to manage the specific
-      environmens these configurations will be planned, and deployed, for.
-    silent: true
-    deps:
-      - task: terraform:workspace:{{ index .MATCH 0 }}
-
-  validate:
-    desc: Validate the Terraform configuration
-    summary: |-
-      Check and validate the syntax of the Terraform configurations to ensure
-      that the code it is correct and valid.
-    deps:
-      - task: terraform:validate
-    silent: true
-
   lint:
-    desc: Lint all Terraform amd associated files within this repository
+    desc: Lint selected files within this repository
     summary: |-
-      Run checks across the Terraform configurations, as well as the repository,
-      to find any potential issues with the configurations before run-time.
+      Run linting checks across the GitHub Workflows and documentation to find
+      any potential issues with the configurations before running.
     silent: true
-    deps:
+    cmds:
       - task: terraform:lint
       - task: prettier
       - task: markdownlint
+      - task: jsonschema
+
+  test:
+    desc: Run tests against Terraform configurations
+    summary: |-
+      Run unit and integration tests against all the Terraform configurations to
+      ensure that any code or deployable resources are valid and correct.
+    silent: true
+    deps:
+      - task: terraform:test
 
   prettier:
     internal: true
     silent: true
     sources:
-      - '.prettier.yaml'
-      - '**/*.json'
-      - '**/*.yaml'
+      - '.*.md'
+      - '.*.yaml'
+      - '.*.json'
+      - '*.md'
+      - '*.yaml'
+      - '*.json'
+      - '.*/**.md'
+      - '.*/**.yaml'
+      - '.*/**.json'
       - '**/*.md'
+      - '**/*.yaml'
+      - '**/*.json'
+      - '{{ .root }}/.prettier.yaml'
+      - '{{ .root }}/.prettierignore'
+      - '{{ .root }}/.gitignore'
+      # This is not a complete Markdown document, but a partial template which
+      # is used when creating pull requests within GitHub, so ignore it.
+      - exclude: .github/PULL_REQUEST_TEMPLATE.md
+      - exclude: terraform
+      - exclude: modules
     deps:
-      - task: utils:check:prettier
+      - task: utils:pre-checks
+    vars:
+      files:
+        sh: |-
+          find . \
+               -type f \
+            \(           -iname '*.yaml' \
+               -or       -iname '*.json' \
+               -or       -iname '*.md' \
+            \) -and -not -iname '.terraform' \
+               -printf '%P '
     cmds:
       - cmd: |-
           prettier --log-level warn \
             --write --config .prettier.yaml \
-            --cache --cache-location .prettier.cache \
-            "**/*.{json,yaml,md}"
+            --cache --cache-location .prettiercache \
+            {{ .files }}
       - cmd: |-
           echo -e '\033[0;32mPassed\033[0m'
 
@@ -83,17 +108,102 @@ tasks:
     internal: true
     silent: true
     sources:
-      - '.markdownlint.yaml'
       - '*.md'
+      - '**/*.md'
+      - '.*/**.md'
+      - '{{ .root }}/.markdownlint.yaml'
+      - '{{ .root }}/.markdownignore'
+      # This is not a complete Markdown document, but a partial template which
+      # is used when creating pull requests within GitHub, so ignore it.
+      - exclude: .github/PULL_REQUEST_TEMPLATE.md
     deps:
       - task: utils:check:markdownlint
+    vars:
+      files:
+        sh: find . -type f -iname '*.md' -printf '%P '
     cmds:
       - cmd: |-
           markdownlint \
-            --config .markdownlint.yaml \
-            *.md
+            --config "{{ .root }}/.markdownlint.yaml" \
+            --ignore-path "{{ .root }}/.markdownignore" \
+            {{ .files }}
       - cmd: |-
-          echo -e "\033[0;32mPassed\033[0m"
+          echo -e '\033[0;32mPassed\033[0m'
+
+  jsonschema:
+    internal: true
+    silent: true
+    cmds:
+      - task: jsonschema:taskfiles
+      - task: jsonschema:dependabot
+      - task: jsonschema:workflows
+
+  jsonschema:taskfiles:
+    internal: true
+    silent: true
+    sources:
+      - 'Taskfile.yaml'
+      - '.taskfiles/*.yaml'
+    deps:
+      - task: utils:check:check-jsonschema
+    cmds:
+      - cmd: |-
+          check-jsonschema \
+            --schemafile https://taskfile.dev/schema.json \
+            --output-format text \
+            Taskfile.yaml .taskfiles/*.yaml
+      - cmd: |-
+          echo -e '\033[0;32mPassed\033[0m'
+
+  jsonschema:dependabot:
+    internal: true
+    silent: true
+    sources:
+      - '.github/dependabot.yaml'
+    deps:
+      - task: utils:check:check-jsonschema
+    cmds:
+      # Check that the dependabot.yaml file exists first, and fail cleanly if
+      # that is the case, otherwise check-jsonschema will fail the check
+      - cmd: |-
+          [[ ! -f .github/dependabot.yaml ]] && exit 0
+          check-jsonschema \
+            --builtin-schema vendor.dependabot \
+            --output-format text \
+            .github/dependabot.yaml
+      - cmd: |-
+          echo -e '\033[0;32mPassed\033[0m'
+
+  jsonschema:workflows:
+    internal: true
+    silent: true
+    vars:
+      files:
+        sh: find .github/workflows -type f -iname '*.yaml' -printf '%h/%P ' 2>/dev/null
+    sources:
+      - '.github/workflows/*.yaml'
+    deps:
+      - task: utils:check:check-jsonschema
+    cmds:
+      # The check-jsonschema application will fail with an error if the file
+      # list passed to it is empty, so exit cleanly beforehand if that's true
+      - cmd: |-
+          [[ -z "{{ .files }}" ]] && exit 0
+          check-jsonschema \
+            --builtin-schema vendor.github-workflows \
+            --output-format text \
+            {{ .files }}
+      - cmd: |-
+          echo -e '\033[0;32mPassed\033[0m'
+
+  validate:
+    desc: Validate the Terraform configuration
+    summary: |-
+      Check and validate the syntax of the Terraform configurations to ensure
+      that the code it is correct and valid.
+    silent: true
+    cmds:
+      - task: terraform:validate
 
   security:
     desc: Run static analysis against Terraform configurations
@@ -101,7 +211,7 @@ tasks:
       Run static analysis tools across the Terraform configurations to find any
       bad configurations or potential security issues.
     silent: true
-    deps:
+    cmds:
       - task: terraform:security
 
   documentation:
@@ -114,23 +224,15 @@ tasks:
     deps:
       - task: terraform:documentation
 
-  test:
-    desc: Run tests against Terraform configurations
-    summary: |-
-      Run unit and integration tests against all the Terraform configurations to
-      ensure that any code or deployable resources are valid and correct.
-    silent: true
-    deps:
-      - task: terraform:test
-
   clean:
     desc: Clean temporary files from the repository and configurations
+    silent: true
     summary: |-
       Clean any temporary directories and files created by both this Taskfile,
       and the tools and applications called from it, and from within the
       configurations.
-    silent: true
     run: once
     cmds:
-      - task: terraform:clean
+      - cmd: rm -f .prettiercache
       - cmd: rm -rf .task
+      - cmd: echo -e '\033[0;32mCompleted\033[0m'

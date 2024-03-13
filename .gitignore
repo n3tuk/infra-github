@@ -7,7 +7,7 @@
 *.tfplan
 
 # Ignore cache files for Prettier linting and formatting checks
-.prettier.cache
+.prettiercache
 
 # Ignore backup files for drawio
 *.drawio.bkp
